@@ -8,9 +8,10 @@ A terminal-based penetration testing enumeration tool. Manage targets, discover 
 
 ## Requirements
 
-### Python
-- Python 3.8+
-- No pip packages required — stdlib only
+### Build dependency
+```bash
+pip3 install pyinstaller
+```
 
 ### External Tools
 
@@ -32,26 +33,29 @@ sudo ln -s $(pwd)/dirsearch.py /usr/local/bin/dirsearch
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 sudo mv ~/go/bin/subfinder /usr/local/bin/
 ```
-> Requires Go. Install Go from https://go.dev/dl/
+> Requires Go — https://go.dev/dl/
 
 ---
 
-## Installation
+## Build
 
 ```bash
 git clone https://github.com/MammadovIzzat/FlashEnum.git
 cd FlashEnum
-chmod +x flash.sh
+make build
 ```
 
----
+Binary will be at `dist/flashenum`.
 
-## Run
-
+#### Install system-wide (optional)
 ```bash
-./flash.sh
-# or
-python3 main.py
+sudo make install
+# runs as: flashenum
+```
+
+#### Clean build artifacts
+```bash
+make clean
 ```
 
 ---
@@ -61,13 +65,13 @@ python3 main.py
 ### Target Management
 - Add / delete targets (IP or domain) — auto-detected
 - Persistent history in SQLite
-- Arrow key selection across the tool
-- Multi-select delete
+- Arrow key navigation across the entire tool
+- Multi-select delete (Space to toggle, Enter to confirm)
 
 ### Dirsearch Integration
 - Run dirsearch against any saved target
-- You control all flags — no presets forced
-- Ctrl+C stops the scan immediately, asks: restart / save partial / discard
+- You control all flags — nothing forced
+- Ctrl+C kills the scan immediately, then asks: restart with new options / save partial / discard
 - All results saved to database per scan
 
 #### Query System
@@ -76,8 +80,9 @@ show 200          show only status 200
 hide 403          exclude 403 from view
 url /admin        filter URLs containing /admin
 scan 3            filter to scan #3
-all               reset all filters
+show all          reset filters and show everything
 delete 403        delete all 403 results (with confirm)
+delete url /tmp   delete results matching URL (with confirm)
 delete scan 3     delete entire scan #3 (with confirm)
 delete all        wipe everything (with confirm)
 list scans        show all saved scans
@@ -93,6 +98,6 @@ list scans        show all saved scans
 
 ## Notes
 
-- `enumtool.db` is created automatically on first run — keep it safe, it holds all your scan data
-- dirsearch and subfinder must be in your `PATH`
+- `enumtool.db` is created automatically on first run in the same directory as the binary — keep it safe, it holds all scan data
+- `dirsearch` and `subfinder` must be in your `PATH`
 - Tested on Linux (Parrot OS / Kali)
