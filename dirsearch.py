@@ -2,10 +2,25 @@ import subprocess
 import signal
 import json
 import os
+import sys
 import tempfile
+import threading
+import time
 from datetime import datetime
 from db import get_connection
 from targets import select_target, list_targets, get_target
+import jobs as jobmgr
+
+
+def _stream_log(log_path, stop_ev):
+    with open(log_path, "r") as f:
+        while not stop_ev.is_set():
+            line = f.readline()
+            if line:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            else:
+                time.sleep(0.05)
 
 
 def run_scan():
@@ -22,60 +37,102 @@ def run_scan():
         tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
         tmp.close()
 
+        log_path = jobmgr.new_log_path()
+        log_fh   = open(log_path, "w", buffering=1)
+
         cmd = f"dirsearch -u {url} --format json -o {tmp.name}"
         if extra:
             cmd += f" {extra}"
 
         print(f"\n  Running: {cmd}\n")
 
+        proc = subprocess.Popen(
+            cmd, shell=True, preexec_fn=os.setsid,
+            stdout=log_fh, stderr=subprocess.STDOUT,
+        )
+
+        stop_ev   = threading.Event()
+        stream_t  = threading.Thread(target=_stream_log, args=(log_path, stop_ev), daemon=True)
+        stream_t.start()
+
         interrupted = False
-        proc = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
         try:
             proc.wait()
+            stop_ev.set()
         except KeyboardInterrupt:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            proc.wait()
             interrupted = True
-            print("\n\n  [!] Scan stopped.\n")
+            stop_ev.set()
+            print("\n\n  [!] Scan interrupted.\n")
 
         if interrupted:
-            print("  [1] Restart with different options")
-            print("  [2] Save partial results and stop")
-            print("  [3] Discard everything and stop\n")
+            print("  [1] Send to background")
+            print("  [2] Restart with different options")
+            print("  [3] Save partial results and stop")
+            print("  [4] Discard everything and stop\n")
             choice = input("  > ").strip()
 
             if choice == "1":
+                job = jobmgr.add_job(f"dirsearch  {target['host']}", proc, log_path)
+
+                def bg_save(j=job, tid=target["id"], u=url, c=cmd, t=tmp.name, fh=log_fh):
+                    j.proc.wait()
+                    fh.close()
+                    j.status = "done"
+                    if os.path.exists(t) and os.path.getsize(t) > 0:
+                        _save_results(tid, u, c, t, silent=True)
+                    if os.path.exists(t):
+                        os.unlink(t)
+
+                threading.Thread(target=bg_save, daemon=True).start()
+                print(f"  [+] Job #{job.id} running in background  (Main Menu → Jobs)\n")
+                return
+
+            elif choice == "2":
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait()
+                log_fh.close()
+                if os.path.exists(log_path):
+                    os.unlink(log_path)
                 if os.path.exists(tmp.name):
                     os.unlink(tmp.name)
                 print()
                 continue
 
-            elif choice == "2":
+            elif choice == "3":
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait()
+                log_fh.close()
                 if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 0:
                     _save_results(target["id"], url, cmd, tmp.name)
                 else:
                     print("  [!] No partial results to save.")
+                if os.path.exists(log_path):
+                    os.unlink(log_path)
                 break
 
             else:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait()
+                log_fh.close()
+                if os.path.exists(log_path):
+                    os.unlink(log_path)
+                if os.path.exists(tmp.name):
+                    os.unlink(tmp.name)
                 print("  Discarded.\n")
                 break
 
         else:
+            log_fh.close()
+            if os.path.exists(log_path):
+                os.unlink(log_path)
             if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 0:
                 _save_results(target["id"], url, cmd, tmp.name)
             else:
                 print("  [!] No output file found. Scan may have failed.")
             break
 
-        if os.path.exists(tmp.name):
-            os.unlink(tmp.name)
 
-    if os.path.exists(tmp.name):
-        os.unlink(tmp.name)
-
-
-def _save_results(target_id, url, command, json_file):
+def _save_results(target_id, url, command, json_file, silent=False):
     try:
         with open(json_file) as f:
             data = json.load(f)
@@ -115,7 +172,8 @@ def _save_results(target_id, url, command, json_file):
 
     conn.commit()
     conn.close()
-    print(f"\n  [+] Saved {len(results)} results from scan #{scan_id}\n")
+    if not silent:
+        print(f"\n  [+] Saved {len(results)} results from scan #{scan_id}\n")
 
 
 # ---------------------------------------------------------------------------

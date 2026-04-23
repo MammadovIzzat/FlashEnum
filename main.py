@@ -3,6 +3,7 @@ from targets import add_target, delete_target, list_targets
 from dirsearch import run_scan as dirsearch_scan, query_menu, _list_scans
 from subfinder import run_scan as subfinder_scan, list_subdomains
 from ui import multi_select, single_select
+import jobs as jobmgr
 
 
 def print_banner():
@@ -143,14 +144,43 @@ def subfinder_menu():
             break
 
 
+def jobs_menu():
+    while True:
+        all_jobs = jobmgr.list_jobs()
+        if not all_jobs:
+            print("  [!] No background jobs.\n")
+            return
+
+        print("\n  --- Background Jobs ---\n")
+        for j in all_jobs:
+            print(f"    [{j.id}] {j.label:<35} {j.status:<10} started {j.started}")
+        print("    [0] Back\n")
+
+        choice = input("  > ").strip()
+        if choice == "0":
+            break
+        if not choice.isdigit():
+            continue
+
+        job = jobmgr.get_job(int(choice))
+        if not job:
+            print("  [!] Invalid job ID.\n")
+            continue
+
+        jobmgr.attach(job)
+
+
 def main_menu():
     print_banner()
     while True:
-        print("""
+        running = sum(1 for j in jobmgr.list_jobs() if j.status == "running")
+        job_label = f"Jobs  [{running} running]" if running else "Jobs"
+        print(f"""
   --- Main Menu ---
   [1] Targets
   [2] Dirsearch
   [3] Subfinder
+  [4] {job_label}
   [0] Exit
 """)
         choice = input("  > ").strip()
@@ -161,6 +191,8 @@ def main_menu():
             dirsearch_menu()
         elif choice == "3":
             subfinder_menu()
+        elif choice == "4":
+            jobs_menu()
         elif choice == "0":
             print("\n  Bye.\n")
             break
