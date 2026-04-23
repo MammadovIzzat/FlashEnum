@@ -70,9 +70,35 @@ def kill_job(job):
     job.status = "killed"
 
 
+def _read_key():
+    fd  = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        return sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
 def attach(job):
     job.refresh()
     print(f"\n  Job #{job.id}: {job.label}  [{job.status}]")
+    print(f"  Started: {job.started}")
+
+    if job.log_path is None:
+        if job.status == "running":
+            print("  Running in background — results save to DB when done.")
+            print("  Press 'k' to kill or any other key to go back.\n")
+            ch = _read_key()
+            if ch == "k":
+                kill_job(job)
+                print(f"\n  [job #{job.id} killed]\n")
+            else:
+                print()
+        else:
+            print("  Finished — check results in the query / subdomains menu.\n")
+        return
+
     print("  'b' detach   'k' kill\n")
     print("  " + "-" * 60)
 

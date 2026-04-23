@@ -1,10 +1,8 @@
 import subprocess
 import signal
 import os
-import sys
 import tempfile
 import threading
-import time
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -35,13 +33,10 @@ def _check_webapp(host):
     return None, None
 
 
-def _save_subdomains(target_id, hosts, out=None):
-    if out is None:
-        out = sys.stdout
-
+def _save_subdomains(target_id, hosts, silent=False):
     def emit(msg, end="\n"):
-        out.write(msg + end)
-        out.flush()
+        if not silent:
+            print(msg, end=end, flush=True)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     today = now[:10]
@@ -93,17 +88,6 @@ def _save_subdomains(target_id, hosts, out=None):
     emit(f"\n  [+] {saved} subdomains saved, {webapps} have web apps and were added to targets.\n")
 
 
-def _stream_log(log_path, stop_ev):
-    with open(log_path, "r") as f:
-        while not stop_ev.is_set():
-            line = f.readline()
-            if line:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-            else:
-                time.sleep(0.05)
-
-
 def run_scan():
     target = select_target()
     if not target:
@@ -118,31 +102,19 @@ def run_scan():
     tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
     tmp.close()
 
-    log_path = jobmgr.new_log_path()
-    log_fh   = open(log_path, "w", buffering=1)
-
     cmd = f"subfinder -d {target['host']} -o {tmp.name}"
     if extra:
         cmd += f" {extra}"
 
     print(f"\n  Running: {cmd}\n")
 
-    proc = subprocess.Popen(
-        cmd, shell=True, preexec_fn=os.setsid,
-        stdout=log_fh, stderr=subprocess.STDOUT,
-    )
-
-    stop_ev  = threading.Event()
-    stream_t = threading.Thread(target=_stream_log, args=(log_path, stop_ev), daemon=True)
-    stream_t.start()
+    proc = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
 
     interrupted = False
     try:
         proc.wait()
-        stop_ev.set()
     except KeyboardInterrupt:
         interrupted = True
-        stop_ev.set()
         print("\n\n  [!] Scan interrupted.\n")
 
     if interrupted:
@@ -151,20 +123,17 @@ def run_scan():
         choice = input("  > ").strip()
 
         if choice == "1":
-            job = jobmgr.add_job(f"subfinder  {target['host']}", proc, log_path)
+            job = jobmgr.add_job(f"subfinder  {target['host']}", proc, None)
 
-            def bg_probe(j=job, tid=target["id"], t=tmp.name, fh=log_fh):
+            def bg_probe(j=job, tid=target["id"], t=tmp.name):
                 j.proc.wait()
                 if os.path.exists(t) and os.path.getsize(t) > 0:
                     with open(t) as f:
                         hosts = [l.strip() for l in f if l.strip()]
                     os.unlink(t)
-                    fh.write(f"\n  [+] Found {len(hosts)} subdomains. Probing...\n\n")
-                    fh.flush()
-                    _save_subdomains(tid, hosts, out=fh)
-                else:
-                    fh.write("  [!] No subdomains found.\n")
-                fh.close()
+                    _save_subdomains(tid, hosts, silent=True)
+                elif os.path.exists(t):
+                    os.unlink(t)
                 j.status = "done"
 
             threading.Thread(target=bg_probe, daemon=True).start()
@@ -174,19 +143,12 @@ def run_scan():
         else:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             proc.wait()
-            log_fh.close()
-            if os.path.exists(log_path):
-                os.unlink(log_path)
             if os.path.exists(tmp.name):
                 os.unlink(tmp.name)
             print("  Discarded.\n")
             return
 
     # Normal finish
-    log_fh.close()
-    if os.path.exists(log_path):
-        os.unlink(log_path)
-
     if not os.path.exists(tmp.name) or os.path.getsize(tmp.name) == 0:
         print("  [!] No subdomains found or subfinder failed.\n")
         if os.path.exists(tmp.name):
