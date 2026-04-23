@@ -1,7 +1,10 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "enumtool.db")
+FLASH_DIR = os.path.join(os.path.expanduser("~"), ".flash")
+DB_PATH   = os.path.join(FLASH_DIR, "enumtool.db")
+
+os.makedirs(FLASH_DIR, exist_ok=True)
 
 
 def get_connection():

@@ -98,6 +98,6 @@ list scans        show all saved scans
 
 ## Notes
 
-- `enumtool.db` is created automatically on first run in the same directory as the binary — keep it safe, it holds all scan data
+- All data is stored in `~/.flash/enumtool.db` — created automatically on first run
 - `dirsearch` and `subfinder` must be in your `PATH`
 - Tested on Linux (Parrot OS / Kali)
